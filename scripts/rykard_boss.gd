@@ -46,6 +46,7 @@ var _flame_dir: Vector3 = Vector3.BACK
 var _combo_step: int = 0
 
 var _skel: Skeleton3D = null
+var _anim_player: AnimationPlayer = null
 var _spine_bones: Array[int] = []
 var _arm_l_bone: int = -1
 var _arm_r_bone: int = -1
@@ -92,7 +93,60 @@ func _setup_model_and_skeleton(root: Node) -> void:
 		elif child is Skeleton3D and _skel == null:
 			_skel = child as Skeleton3D
 			_cache_bones()
+			_setup_real_animations()
 		_setup_model_and_skeleton(child)
+
+func _setup_real_animations() -> void:
+	if not _skel:
+		return
+	var parent := _skel.get_parent()
+	if not parent:
+		return
+	_anim_player = AnimationPlayer.new()
+	parent.add_child(_anim_player)
+	var lib := AnimationLibrary.new()
+	var clip_map := {
+		"idle": ["res://assets/anims/rykard/a000_000020.glb", true],
+		"atk_0": ["res://assets/anims/rykard/a000_003000.glb", false],
+		"atk_1": ["res://assets/anims/rykard/a000_003001.glb", false],
+		"atk_2": ["res://assets/anims/rykard/a000_003002.glb", false],
+		"atk_3": ["res://assets/anims/rykard/a000_003003.glb", false],
+	}
+	for cname in clip_map.keys():
+		var info: Array = clip_map[cname]
+		var anim := _extract_anim(info[0], info[1])
+		if anim:
+			lib.add_animation(cname, anim)
+	_anim_player.add_animation_library("", lib)
+	if _anim_player.has_animation("idle"):
+		_anim_player.play("idle")
+
+func _extract_anim(glb_path: String, loop: bool) -> Animation:
+	var ps: PackedScene = load(glb_path)
+	if not ps:
+		return null
+	var tmp := ps.instantiate()
+	var src_ap: AnimationPlayer = _find_anim_player(tmp)
+	var out_anim: Animation = null
+	if src_ap and src_ap.has_animation("Motion"):
+		out_anim = src_ap.get_animation("Motion").duplicate() as Animation
+		out_anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+		# Strip Master root-motion position track so boss stays on CharacterBody3D
+		for i in range(out_anim.get_track_count() - 1, -1, -1):
+			var tp := str(out_anim.track_get_path(i))
+			if tp.ends_with(":Master") and out_anim.track_get_type(i) == Animation.TYPE_POSITION_3D:
+				out_anim.remove_track(i)
+	tmp.queue_free()
+	return out_anim
+
+func _find_anim_player(n: Node) -> AnimationPlayer:
+	if n is AnimationPlayer:
+		return n as AnimationPlayer
+	for c in n.get_children():
+		var res := _find_anim_player(c)
+		if res:
+			return res
+	return null
 
 func _cache_bones() -> void:
 	if not _skel:
@@ -145,6 +199,22 @@ func _set_bone_offset(idx: int, euler: Vector3, weight: float = 1.0) -> void:
 	_skel.set_bone_pose_rotation(idx, cur_q.slerp(target_q, weight))
 
 func _animate_skeleton(delta: float) -> void:
+	# Real Elden Ring Havok animations are driven by _anim_player
+	if _anim_player and _anim_player.has_animation("idle"):
+		var target_clip := "idle"
+		match state:
+			State.P1_BITE_LUNGE, State.P1_MULTI_BITE:
+				target_clip = "atk_0" if _anim_player.has_animation("atk_0") else "idle"
+			State.P1_SERPENT_SWEEP, State.P2_SWORD_COMBO:
+				target_clip = "atk_1" if _anim_player.has_animation("atk_1") else "idle"
+			State.P1_BODY_SLAM, State.P2_TAKERS_FLAMES:
+				target_clip = "atk_2" if _anim_player.has_animation("atk_2") else "idle"
+			State.P1_MAGMA_SPIT, State.P2_RYKARDS_RANCOR, State.P2_RAIN_OF_SKULLS:
+				target_clip = "atk_3" if _anim_player.has_animation("atk_3") else "idle"
+		if _anim_player.current_animation != target_clip:
+			_anim_player.play(target_clip, 0.25)
+		return
+
 	var blend := clampf(delta * 9.0, 0.0, 1.0)
 	var t := 0.0
 	if _state_duration > 0.0:

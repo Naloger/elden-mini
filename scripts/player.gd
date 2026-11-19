@@ -26,9 +26,15 @@ var _stamina_regen_delay: float = 0.0
 var _invulnerable: bool = false
 var _dead: bool = false
 var _boss: Node3D = null
+var _anim_time: float = 0.0
+var _skels: Array[Skeleton3D] = []
+var _anim_players: Array[AnimationPlayer] = []
+var _bone_cache: Array[Dictionary] = []
+var _current_anim: String = ""
 
 @onready var visual: Node3D = $Visual
 @onready var weapon_pivot: Node3D = $Visual/WeaponPivot
+@onready var shield_pivot: Node3D = $Visual/ShieldPivot
 
 const BEAM_SCRIPT := preload("res://scripts/serpent_beam.gd")
 
@@ -38,8 +44,87 @@ func _ready() -> void:
 	stamina = max_stamina
 	if boss_path != NodePath():
 		_boss = get_node_or_null(boss_path)
+	_collect_skeletons(visual)
+	_setup_player_real_anims()
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
+
+func _setup_player_real_anims() -> void:
+	if _skels.is_empty():
+		return
+	var lib := AnimationLibrary.new()
+	var clips := {
+		"idle": ["res://assets/anims/player/a000_000000.glb", true],
+		"walk": ["res://assets/anims/player/a000_000100.glb", true],
+		"run": ["res://assets/anims/player/a000_000110.glb", true],
+		"roll": ["res://assets/anims/player/a000_004000.glb", false],
+	}
+	for cname in clips.keys():
+		var info: Array = clips[cname]
+		var anim := _extract_anim(info[0], info[1])
+		if anim:
+			lib.add_animation(cname, anim)
+	for sk in _skels:
+		var p := sk.get_parent()
+		if not p:
+			continue
+		var ap := AnimationPlayer.new()
+		p.add_child(ap)
+		ap.add_animation_library("", lib.duplicate(true))
+		if ap.has_animation("idle"):
+			ap.play("idle")
+		_anim_players.append(ap)
+	_current_anim = "idle"
+
+func _extract_anim(glb_path: String, loop: bool) -> Animation:
+	var ps: PackedScene = load(glb_path)
+	if not ps:
+		return null
+	var tmp := ps.instantiate()
+	var src_ap := _find_ap(tmp)
+	var out_anim: Animation = null
+	if src_ap and src_ap.has_animation("Motion"):
+		out_anim = src_ap.get_animation("Motion").duplicate() as Animation
+		out_anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+		for i in range(out_anim.get_track_count() - 1, -1, -1):
+			var tp := str(out_anim.track_get_path(i))
+			if tp.ends_with(":Master") and out_anim.track_get_type(i) == Animation.TYPE_POSITION_3D:
+				out_anim.remove_track(i)
+	tmp.queue_free()
+	return out_anim
+
+func _find_ap(n: Node) -> AnimationPlayer:
+	if n is AnimationPlayer:
+		return n as AnimationPlayer
+	for c in n.get_children():
+		var res := _find_ap(c)
+		if res:
+			return res
+	return null
+
+func _play_player_anim(cname: String) -> void:
+	if _current_anim == cname or _anim_players.is_empty():
+		return
+	_current_anim = cname
+	for ap in _anim_players:
+		if ap.has_animation(cname):
+			ap.play(cname, 0.12)
+
+func _collect_skeletons(node: Node) -> void:
+	if not node:
+		return
+	if node is Skeleton3D:
+		var sk := node as Skeleton3D
+		var d := {}
+		for bname in ["L_Thigh", "R_Thigh", "L_Calf", "R_Calf", "Spine", "Spine1", "L_UpperArm", "R_UpperArm", "L_Forearm", "R_Forearm"]:
+			var idx := sk.find_bone(bname)
+			if idx != -1:
+				d[bname] = [idx, sk.get_bone_pose_rotation(idx)]
+		if not d.is_empty():
+			_skels.append(sk)
+			_bone_cache.append(d)
+	for c in node.get_children():
+		_collect_skeletons(c)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _dead:
@@ -64,16 +149,12 @@ func _physics_process(delta: float) -> void:
 
 	if _is_dodging:
 		_dodge_timer -= delta
-		var roll_t := 1.0 - clampf(_dodge_timer / dodge_duration, 0.0, 1.0)
-		visual.rotation.x = -roll_t * TAU
-		visual.position.y = sin(roll_t * PI) * 0.45
+		_play_player_anim("roll")
 		velocity.x = _dodge_dir.x * dodge_speed
 		velocity.z = _dodge_dir.z * dodge_speed
 		if _dodge_timer <= 0.0:
 			_is_dodging = false
 			_invulnerable = false
-			visual.rotation.x = 0.0
-			visual.position.y = 0.0
 	else:
 		var input_dir := _get_move_input()
 		var cam := get_viewport().get_camera_3d()
@@ -113,9 +194,48 @@ func _physics_process(delta: float) -> void:
 		global_position.x = flat_pos.x
 		global_position.z = flat_pos.y
 
+	_anim_time += delta
+	var flat_speed := Vector2(velocity.x, velocity.z).length()
+	var is_moving := flat_speed > 0.5 and not _is_dodging
+
+	if not _is_dodging:
+		_play_player_anim("run" if is_moving else "idle")
+
 	# Animate weapon pivot back to rest
 	if weapon_pivot:
 		weapon_pivot.rotation.x = lerpf(weapon_pivot.rotation.x, 0.0, 10.0 * delta)
+
+func _pose_knight_bones(stride_rad: float, spine_lean: float) -> void:
+	for i in range(_skels.size()):
+		var sk := _skels[i]
+		var d := _bone_cache[i]
+		if d.has("L_Thigh"):
+			var b: Array = d["L_Thigh"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(stride_rad, 0.0, 0.0)))
+		if d.has("R_Thigh"):
+			var b: Array = d["R_Thigh"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(-stride_rad, 0.0, 0.0)))
+		if d.has("L_Calf"):
+			var b: Array = d["L_Calf"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(maxf(0.0, -stride_rad * 0.8), 0.0, 0.0)))
+		if d.has("R_Calf"):
+			var b: Array = d["R_Calf"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(maxf(0.0, stride_rad * 0.8), 0.0, 0.0)))
+		if d.has("Spine1"):
+			var b: Array = d["Spine1"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(spine_lean, 0.0, 0.0)))
+		if d.has("L_UpperArm"):
+			var b: Array = d["L_UpperArm"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.55, 0.0, 0.85)))
+		if d.has("R_UpperArm"):
+			var b: Array = d["R_UpperArm"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.55, 0.0, -0.85)))
+		if d.has("L_Forearm"):
+			var b: Array = d["L_Forearm"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.75, 0.0, 0.0)))
+		if d.has("R_Forearm"):
+			var b: Array = d["R_Forearm"]
+			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.75, 0.0, 0.0)))
 
 func _get_move_input() -> Vector2:
 	var kb := Vector2(
