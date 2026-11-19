@@ -45,7 +45,6 @@ func _ready() -> void:
 	if boss_path != NodePath():
 		_boss = get_node_or_null(boss_path)
 	_collect_skeletons(visual)
-	_setup_player_real_anims()
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
 
@@ -151,12 +150,16 @@ func _physics_process(delta: float) -> void:
 
 	if _is_dodging:
 		_dodge_timer -= delta
-		_play_player_anim("roll")
+		var roll_t := 1.0 - clampf(_dodge_timer / dodge_duration, 0.0, 1.0)
+		visual.rotation.x = -roll_t * TAU
+		visual.position.y = sin(roll_t * PI) * 0.45
 		velocity.x = _dodge_dir.x * dodge_speed
 		velocity.z = _dodge_dir.z * dodge_speed
 		if _dodge_timer <= 0.0:
 			_is_dodging = false
 			_invulnerable = false
+			visual.rotation.x = 0.0
+			visual.position.y = 0.0
 	else:
 		var input_dir := _get_move_input()
 		var cam := get_viewport().get_camera_3d()
@@ -201,7 +204,20 @@ func _physics_process(delta: float) -> void:
 	var is_moving := flat_speed > 0.5 and not _is_dodging
 
 	if not _is_dodging:
-		_play_player_anim("run" if is_moving else "idle")
+		if is_moving:
+			var stride := sin(_anim_time * 11.0)
+			visual.position.y = absf(stride) * 0.045
+			visual.rotation.x = lerpf(visual.rotation.x, -0.08, 10.0 * delta)
+			if shield_pivot:
+				shield_pivot.position.y = 1.05 + absf(stride) * 0.03
+			_pose_knight_bones(stride * 0.55, 0.08)
+		else:
+			var breath := sin(_anim_time * 2.4)
+			visual.position.y = breath * 0.015
+			visual.rotation.x = lerpf(visual.rotation.x, 0.0, 10.0 * delta)
+			if shield_pivot:
+				shield_pivot.position.y = 1.05 + breath * 0.015
+			_pose_knight_bones(0.0, 0.0)
 
 	# Animate weapon pivot back to rest
 	if weapon_pivot:

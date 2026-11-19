@@ -181,7 +181,7 @@ shape = SubResource("CapsuleShape_player")
 [node name="Visual" type="Node3D" parent="Player" unique_id=1198372381]
 
 [node name="CrucibleKnight" parent="Player/Visual" unique_id=1005980466 instance=ExtResource("11_crucible_glb")]
-transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+transform = Transform3D(-1, 0, 0, 0, -4.37114e-08, -1, 0, -1, 4.37114e-08, 0, 0, 0)
 
 [node name="ShieldPivot" type="Node3D" parent="Player/Visual" unique_id=696170870]
 transform = Transform3D(-0.34, 0, 0.94, 0, 1, 0, -0.94, 0, -0.34, -0.45, 1.05, -0.18)
