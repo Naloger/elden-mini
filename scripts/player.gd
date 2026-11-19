@@ -89,8 +89,8 @@ func _extract_anim(glb_path: String, loop: bool) -> Animation:
 		out_anim = src_ap.get_animation("Motion").duplicate() as Animation
 		out_anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
 		for i in range(out_anim.get_track_count() - 1, -1, -1):
-			var tp := str(out_anim.track_get_path(i))
-			if tp.ends_with(":Master") and out_anim.track_get_type(i) == Animation.TYPE_POSITION_3D:
+			var ttype := out_anim.track_get_type(i)
+			if ttype == Animation.TYPE_POSITION_3D or ttype == Animation.TYPE_SCALE_3D:
 				out_anim.remove_track(i)
 	tmp.queue_free()
 	return out_anim
