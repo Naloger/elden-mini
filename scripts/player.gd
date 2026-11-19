@@ -68,6 +68,8 @@ func _setup_player_real_anims() -> void:
 		var p := sk.get_parent()
 		if not p:
 			continue
+		if p is Node3D:
+			(p as Node3D).transform = Transform3D.IDENTITY
 		var ap := AnimationPlayer.new()
 		p.add_child(ap)
 		ap.add_animation_library("", lib.duplicate(true))

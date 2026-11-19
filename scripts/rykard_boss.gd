@@ -102,6 +102,8 @@ func _setup_real_animations() -> void:
 	var parent := _skel.get_parent()
 	if not parent:
 		return
+	if parent is Node3D:
+		(parent as Node3D).transform = Transform3D.IDENTITY
 	_anim_player = AnimationPlayer.new()
 	parent.add_child(_anim_player)
 	var lib := AnimationLibrary.new()
