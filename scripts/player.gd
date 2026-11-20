@@ -4,9 +4,18 @@ signal hp_changed(current: float, max_hp: float)
 signal stamina_changed(current: float, max_stamina: float)
 signal died
 
-@export var move_speed: float = 8.5
-@export var dodge_speed: float = 19.0
-@export var dodge_duration: float = 0.34
+enum State {
+	IDLE,
+	WALK,
+	RUN,
+	ROLL,
+	ATTACK
+}
+
+@export var move_speed: float = 7.0
+@export var run_speed: float = 11.5
+@export var dodge_speed: float = 18.0
+@export var dodge_duration: float = 0.45
 @export var dodge_stamina_cost: float = 25.0
 @export var attack_stamina_cost: float = 20.0
 @export var max_hp: float = 100.0
@@ -14,24 +23,19 @@ signal died
 @export var arena_radius: float = 20.5
 @export var boss_path: NodePath
 
+var current_state: State = State.IDLE
 var hp: float = 100.0
 var stamina: float = 100.0
 var touch_move_vec: Vector2 = Vector2.ZERO
 
-var _is_dodging: bool = false
-var _dodge_timer: float = 0.0
-var _dodge_dir: Vector3 = Vector3.FORWARD
-var _is_attacking: bool = false
-var _attack_timer: float = 0.0
+var _state_timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _stamina_regen_delay: float = 0.0
+var _dodge_dir: Vector3 = Vector3.FORWARD
 var _invulnerable: bool = false
 var _dead: bool = false
 var _boss: Node3D = null
-var _anim_time: float = 0.0
-var _skels: Array[Skeleton3D] = []
 var _anim_players: Array[AnimationPlayer] = []
-var _bone_cache: Array[Dictionary] = []
 var _current_anim: String = ""
 
 @onready var visual: Node3D = $Visual
@@ -39,16 +43,9 @@ var _current_anim: String = ""
 @onready var shield_pivot: Node3D = $Visual/ShieldPivot
 
 const BEAM_SCRIPT := preload("res://scripts/serpent_beam.gd")
-const WEAPON_REST_BASIS := Basis(
-	Vector3(0.702013, -0.087365, -0.706785),
-	Vector3(0.693094, -0.144311, 0.706254),
-	Vector3(-0.163698, -0.985668, -0.040756)
-)
-const SHIELD_REST_BASIS := Basis(
-	Vector3(-0.65956, 0.345855, 0.667356),
-	Vector3(0.219584, 0.93778, -0.268981),
-	Vector3(-0.718862, -0.030869, -0.694467)
-)
+# Weapon points along -Z when identity, shield faces along -Z when rotated -90 deg on X
+const WEAPON_REST_BASIS := Basis.IDENTITY
+const SHIELD_REST_BASIS := Basis(Vector3(1, 0, 0), -PI / 2.0)
 
 func _ready() -> void:
 	add_to_group("player")
@@ -56,30 +53,27 @@ func _ready() -> void:
 	stamina = max_stamina
 	if boss_path != NodePath():
 		_boss = get_node_or_null(boss_path)
-	_collect_skeletons(visual)
 	_setup_player_real_anims()
 	_attach_equipment_to_hands()
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
+	change_state(State.IDLE, true)
 
 func _setup_player_real_anims() -> void:
 	var ap := _find_ap(visual)
 	if not ap:
 		return
-	for cname in ["idle", "walk", "run", "roll", "attack", "heavy_attack"]:
+	for cname in ["idle", "walk", "run", "roll", "attack"]:
 		if ap.has_animation(cname):
 			var anim := ap.get_animation(cname)
 			anim.loop_mode = Animation.LOOP_LINEAR if cname in ["idle", "walk", "run"] else Animation.LOOP_NONE
 	_anim_players = [ap]
-	if ap.has_animation("idle"):
-		ap.play("idle")
-		_current_anim = "idle"
 
 func _attach_equipment_to_hands() -> void:
-	if _skels.is_empty():
+	var sk := _find_skeleton(visual)
+	if not sk:
 		return
-	var sk: Skeleton3D = _skels[0]
-	# Note: c0000 glTF is X-mirrored from Elden Ring's left-handed space (+X = right side, -X = left side)
+	# c0000 glTF convention: L_Weapon/L_Hand is physical right arm (+X), R_Weapon/R_Hand is physical left arm (-X)
 	var right_hand_bone := "L_Weapon" if sk.find_bone("L_Weapon") != -1 else "L_Hand"
 	if sk.find_bone(right_hand_bone) != -1 and weapon_pivot:
 		var ba_r := BoneAttachment3D.new()
@@ -87,7 +81,8 @@ func _attach_equipment_to_hands() -> void:
 		ba_r.bone_name = right_hand_bone
 		sk.add_child(ba_r)
 		weapon_pivot.reparent(ba_r, false)
-		weapon_pivot.transform = Transform3D(WEAPON_REST_BASIS.orthonormalized(), Vector3.ZERO)
+		weapon_pivot.transform = Transform3D(WEAPON_REST_BASIS, Vector3.ZERO)
+
 	var left_hand_bone := "R_Weapon" if sk.find_bone("R_Weapon") != -1 else "R_Hand"
 	if sk.find_bone(left_hand_bone) != -1 and shield_pivot:
 		var ba_l := BoneAttachment3D.new()
@@ -95,7 +90,16 @@ func _attach_equipment_to_hands() -> void:
 		ba_l.bone_name = left_hand_bone
 		sk.add_child(ba_l)
 		shield_pivot.reparent(ba_l, false)
-		shield_pivot.transform = Transform3D(SHIELD_REST_BASIS.orthonormalized(), Vector3.ZERO)
+		shield_pivot.transform = Transform3D(SHIELD_REST_BASIS, Vector3.ZERO)
+
+func _find_skeleton(n: Node) -> Skeleton3D:
+	if n is Skeleton3D:
+		return n as Skeleton3D
+	for c in n.get_children():
+		var res := _find_skeleton(c)
+		if res:
+			return res
+	return null
 
 func _find_ap(n: Node) -> AnimationPlayer:
 	if n is AnimationPlayer:
@@ -105,6 +109,38 @@ func _find_ap(n: Node) -> AnimationPlayer:
 		if res:
 			return res
 	return null
+
+func change_state(new_state: State, force: bool = false) -> void:
+	if not force and current_state == new_state:
+		return
+
+	# State Exit Logic
+	match current_state:
+		State.ROLL:
+			_invulnerable = false
+			visual.rotation.x = 0.0
+			visual.position.y = 0.0
+		State.ATTACK:
+			pass
+
+	current_state = new_state
+
+	# State Enter Logic
+	match current_state:
+		State.IDLE:
+			_play_player_anim("idle")
+		State.WALK:
+			_play_player_anim("walk")
+		State.RUN:
+			_play_player_anim("run")
+		State.ROLL:
+			_invulnerable = true
+			_state_timer = dodge_duration
+			_play_player_anim("roll", true)
+		State.ATTACK:
+			_state_timer = 0.60
+			_attack_cooldown = 0.65
+			_play_player_anim("attack", true)
 
 func _play_player_anim(cname: String, force_restart: bool = false) -> void:
 	if not force_restart and _current_anim == cname:
@@ -116,23 +152,7 @@ func _play_player_anim(cname: String, force_restart: bool = false) -> void:
 		if ap.has_animation(cname):
 			if force_restart:
 				ap.stop()
-			ap.play(cname, 0.1)
-
-func _collect_skeletons(node: Node) -> void:
-	if not node:
-		return
-	if node is Skeleton3D:
-		var sk := node as Skeleton3D
-		var d := {}
-		for bname in ["L_Thigh", "R_Thigh", "L_Calf", "R_Calf", "Spine", "Spine1", "L_UpperArm", "R_UpperArm", "L_Forearm", "R_Forearm"]:
-			var idx := sk.find_bone(bname)
-			if idx != -1:
-				d[bname] = [idx, sk.get_bone_pose_rotation(idx)]
-		if not d.is_empty():
-			_skels.append(sk)
-			_bone_cache.append(d)
-	for c in node.get_children():
-		_collect_skeletons(c)
+			ap.play(cname, 0.12)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _dead:
@@ -155,49 +175,64 @@ func _physics_process(delta: float) -> void:
 		stamina = minf(max_stamina, stamina + 34.0 * delta)
 		emit_signal("stamina_changed", stamina, max_stamina)
 
-	if _is_attacking:
-		_attack_timer -= delta
-		if _attack_timer <= 0.0:
-			_is_attacking = false
+	# State Machine Update
+	match current_state:
+		State.ROLL:
+			_state_timer -= delta
+			velocity.x = _dodge_dir.x * dodge_speed
+			velocity.z = _dodge_dir.z * dodge_speed
+			if _state_timer <= 0.0:
+				_transition_after_action()
 
-	if _is_dodging:
-		_dodge_timer -= delta
-		_play_player_anim("roll")
-		velocity.x = _dodge_dir.x * dodge_speed
-		velocity.z = _dodge_dir.z * dodge_speed
-		if _dodge_timer <= 0.0:
-			_is_dodging = false
-			_invulnerable = false
-			visual.rotation.x = 0.0
-			visual.position.y = 0.0
-	else:
-		var input_dir := _get_move_input()
-		var cam := get_viewport().get_camera_3d()
-		var move_dir := Vector3.ZERO
-		if input_dir.length() > 0.05:
-			if cam:
-				var forward := -cam.global_transform.basis.z
-				forward.y = 0.0
-				forward = forward.normalized()
-				var right := cam.global_transform.basis.x
-				right.y = 0.0
-				right = right.normalized()
-				move_dir = (right * input_dir.x + forward * (-input_dir.y)).normalized()
+		State.ATTACK:
+			_state_timer -= delta
+			velocity.x = move_toward(velocity.x, 0.0, 35.0 * delta)
+			velocity.z = move_toward(velocity.z, 0.0, 35.0 * delta)
+			if _state_timer <= 0.0:
+				_transition_after_action()
+
+		State.IDLE, State.WALK, State.RUN:
+			var input_dir := _get_move_input()
+			var cam := get_viewport().get_camera_3d()
+			var move_dir := Vector3.ZERO
+
+			if input_dir.length() > 0.05:
+				if cam:
+					var forward := -cam.global_transform.basis.z
+					forward.y = 0.0
+					forward = forward.normalized()
+					var right := cam.global_transform.basis.x
+					right.y = 0.0
+					right = right.normalized()
+					move_dir = (right * input_dir.x + forward * (-input_dir.y)).normalized()
+				else:
+					move_dir = Vector3(input_dir.x, 0.0, input_dir.y).normalized()
+
+			if move_dir.length() > 0.05:
+				var is_running := input_dir.length() > 0.7 or Input.is_key_pressed(KEY_SHIFT)
+				var cur_speed := run_speed if is_running else move_speed
+				velocity.x = move_dir.x * cur_speed
+				velocity.z = move_dir.z * cur_speed
+
+				var target_rot := atan2(-move_dir.x, -move_dir.z)
+				visual.rotation.y = lerp_angle(visual.rotation.y, target_rot, 14.0 * delta)
+
+				if is_running:
+					change_state(State.RUN)
+				else:
+					change_state(State.WALK)
 			else:
-				move_dir = Vector3(input_dir.x, 0.0, input_dir.y).normalized()
+				velocity.x = move_toward(velocity.x, 0.0, 30.0 * delta)
+				velocity.z = move_toward(velocity.z, 0.0, 30.0 * delta)
 
-		velocity.x = move_dir.x * move_speed
-		velocity.z = move_dir.z * move_speed
+				if _boss and is_instance_valid(_boss):
+					var to_boss := (_boss.global_position - global_position)
+					to_boss.y = 0.0
+					if to_boss.length() > 0.1:
+						var lock_rot := atan2(-to_boss.x, -to_boss.z)
+						visual.rotation.y = lerp_angle(visual.rotation.y, lock_rot, 5.0 * delta)
 
-		if move_dir.length() > 0.05:
-			var target_rot := atan2(-move_dir.x, -move_dir.z)
-			visual.rotation.y = lerp_angle(visual.rotation.y, target_rot, 12.0 * delta)
-		elif _boss and is_instance_valid(_boss):
-			var to_boss := (_boss.global_position - global_position)
-			to_boss.y = 0.0
-			if to_boss.length() > 0.1:
-				var lock_rot := atan2(-to_boss.x, -to_boss.z)
-				visual.rotation.y = lerp_angle(visual.rotation.y, lock_rot, 6.0 * delta)
+				change_state(State.IDLE)
 
 	velocity.y = 0.0
 	move_and_slide()
@@ -209,54 +244,14 @@ func _physics_process(delta: float) -> void:
 		global_position.x = flat_pos.x
 		global_position.z = flat_pos.y
 
-	_anim_time += delta
-	var flat_speed := Vector2(velocity.x, velocity.z).length()
-
-	if not _is_dodging and not _is_attacking:
-		if flat_speed > 5.0:
-			_play_player_anim("run")
-		elif flat_speed > 0.5:
-			_play_player_anim("walk")
-		else:
-			_play_player_anim("idle")
-
-	# Maintain proper weapon and shield rotations on their bone attachments
-	if weapon_pivot and weapon_pivot.transform.basis != WEAPON_REST_BASIS:
-		weapon_pivot.transform.basis = weapon_pivot.transform.basis.slerp(WEAPON_REST_BASIS, 10.0 * delta)
-	if shield_pivot and shield_pivot.transform.basis != SHIELD_REST_BASIS:
-		shield_pivot.transform.basis = shield_pivot.transform.basis.slerp(SHIELD_REST_BASIS, 10.0 * delta)
-
-func _pose_knight_bones(stride_rad: float, spine_lean: float) -> void:
-	for i in range(_skels.size()):
-		var sk := _skels[i]
-		var d := _bone_cache[i]
-		if d.has("L_Thigh"):
-			var b: Array = d["L_Thigh"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(stride_rad, 0.0, 0.0)))
-		if d.has("R_Thigh"):
-			var b: Array = d["R_Thigh"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(-stride_rad, 0.0, 0.0)))
-		if d.has("L_Calf"):
-			var b: Array = d["L_Calf"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(maxf(0.0, -stride_rad * 0.8), 0.0, 0.0)))
-		if d.has("R_Calf"):
-			var b: Array = d["R_Calf"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(maxf(0.0, stride_rad * 0.8), 0.0, 0.0)))
-		if d.has("Spine1"):
-			var b: Array = d["Spine1"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(spine_lean, 0.0, 0.0)))
-		if d.has("L_UpperArm"):
-			var b: Array = d["L_UpperArm"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.55, 0.0, 0.85)))
-		if d.has("R_UpperArm"):
-			var b: Array = d["R_UpperArm"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.55, 0.0, -0.85)))
-		if d.has("L_Forearm"):
-			var b: Array = d["L_Forearm"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.75, 0.0, 0.0)))
-		if d.has("R_Forearm"):
-			var b: Array = d["R_Forearm"]
-			sk.set_bone_pose_rotation(b[0], (b[1] as Quaternion) * Quaternion.from_euler(Vector3(0.75, 0.0, 0.0)))
+func _transition_after_action() -> void:
+	var input_dir := _get_move_input()
+	if input_dir.length() > 0.7 or Input.is_key_pressed(KEY_SHIFT):
+		change_state(State.RUN, true)
+	elif input_dir.length() > 0.05:
+		change_state(State.WALK, true)
+	else:
+		change_state(State.IDLE, true)
 
 func _get_move_input() -> Vector2:
 	var kb := Vector2(
@@ -278,7 +273,7 @@ func _get_move_input() -> Vector2:
 	return combined
 
 func trigger_dodge() -> void:
-	if _dead or _is_dodging or stamina < dodge_stamina_cost:
+	if _dead or current_state == State.ROLL or stamina < dodge_stamina_cost:
 		return
 	stamina -= dodge_stamina_cost
 	_stamina_regen_delay = 0.55
@@ -295,23 +290,14 @@ func trigger_dodge() -> void:
 	else:
 		_dodge_dir = -visual.global_transform.basis.z.normalized()
 
-	_is_dodging = true
-	_is_attacking = false
-	_invulnerable = true
-	_dodge_timer = dodge_duration
-	_play_player_anim("roll", true)
+	change_state(State.ROLL, true)
 
 func trigger_attack() -> void:
-	if _dead or _is_dodging or _attack_cooldown > 0.0 or stamina < attack_stamina_cost:
+	if _dead or current_state == State.ROLL or current_state == State.ATTACK or _attack_cooldown > 0.0 or stamina < attack_stamina_cost:
 		return
 	stamina -= attack_stamina_cost
 	_stamina_regen_delay = 0.65
-	_attack_cooldown = 0.55
-	_is_attacking = true
-	_attack_timer = 0.55
 	emit_signal("stamina_changed", stamina, max_stamina)
-
-	_play_player_anim("attack", true)
 
 	# Face boss on Serpent-Hunter strike
 	var aim_dir := -visual.global_transform.basis.z.normalized()
@@ -323,6 +309,7 @@ func trigger_attack() -> void:
 			if flat_dir.length() > 0.05:
 				visual.rotation.y = atan2(-flat_dir.x, -flat_dir.z)
 
+	change_state(State.ATTACK, true)
 	_spawn_serpent_beam(aim_dir)
 
 func _spawn_serpent_beam(aim_dir: Vector3) -> void:
