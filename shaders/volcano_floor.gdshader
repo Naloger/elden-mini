@@ -2,7 +2,7 @@ shader_type spatial;
 
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap, repeat_enable;
-uniform float uv_scale = 0.22;
+uniform float uv_scale = 0.16;
 
 varying vec3 world_pos;
 
@@ -34,31 +34,32 @@ void vertex() {
 }
 
 void fragment() {
-	vec2 uv_main = world_pos.xz * uv_scale;
-	vec2 uv_macro = world_pos.xz * (uv_scale * 0.27) + vec2(0.37, 0.61);
+	// Dual-scale world-space volcanic basalt sampling (zero visible tiling seams)
+	vec2 uv_detail = world_pos.xz * uv_scale;
+	vec2 uv_macro = world_pos.xz * (uv_scale * 0.23) + vec2(0.41, 0.73);
 
-	vec3 tex_a = texture(albedo_tex, uv_main).rgb;
-	vec3 tex_macro = texture(albedo_tex, uv_macro).rgb;
-	vec3 rock = mix(tex_a, tex_macro, 0.35);
+	vec3 rock_d = texture(albedo_tex, uv_detail).rgb;
+	vec3 rock_m = texture(albedo_tex, uv_macro).rgb;
+	vec3 rock = mix(rock_d, rock_m, 0.38);
 
-	vec3 n1 = texture(normal_tex, uv_main).rgb;
-	vec3 n2 = texture(normal_tex, uv_macro).rgb;
-	NORMAL_MAP = normalize(mix(n1, n2, 0.3));
-	NORMAL_MAP_DEPTH = 1.45;
+	vec3 n_d = texture(normal_tex, uv_detail).rgb;
+	vec3 n_m = texture(normal_tex, uv_macro).rgb;
+	NORMAL_MAP = normalize(mix(n_d, n_m, 0.35));
+	NORMAL_MAP_DEPTH = 2.0;
 
-	// Darken & char toward Volcano Manor basalt/ash palette
-	float ash_mask = fbm(world_pos.xz * 0.18);
-	vec3 basalt_tint = mix(vec3(0.36, 0.28, 0.24), vec3(0.55, 0.44, 0.38), ash_mask);
-	vec3 stone = rock * basalt_tint;
+	// Ash drifts & scorched basalt patches (authentic Rykard Audience Chamber ground)
+	float ash_patch = smoothstep(0.32, 0.72, fbm(world_pos.xz * 0.09));
+	vec3 dark_basalt = rock * vec3(0.72, 0.60, 0.54);
+	vec3 grey_ash = rock * vec3(1.15, 1.02, 0.94);
+	vec3 surface = mix(dark_basalt, grey_ash, ash_patch * 0.65);
 
-	// Fine glowing magma fissures in rock crevices
-	float vein = abs(fbm(world_pos.xz * 0.45) - 0.5);
-	float crack = smoothstep(0.003, 0.011, vein);
-	float pulse = 0.78 + 0.22 * sin(TIME * 2.1 + world_pos.x * 0.3 + world_pos.z * 0.25);
-	vec3 ember = vec3(1.0, 0.24, 0.03) * pulse;
+	// Subtle outer-edge heat glow near the surrounding lava ring (radius > 34m)
+	float dist = length(world_pos.xz);
+	float rim_heat = smoothstep(32.0, 41.5, dist) * (1.0 - smoothstep(0.18, 0.45, rock.r));
+	vec3 ember = vec3(1.0, 0.25, 0.03) * (0.85 + 0.15 * sin(TIME * 2.0 + dist * 0.4));
 
-	ALBEDO = mix(ember * 0.5, stone, crack);
-	ROUGHNESS = mix(0.35, 0.90 - rock.r * 0.12, crack);
-	METALLIC = 0.05;
-	EMISSION = ember * (1.0 - crack) * 0.45;
+	ALBEDO = mix(surface, ember * 0.6, rim_heat * 0.55);
+	ROUGHNESS = clamp(0.92 - rock.r * 0.25, 0.55, 0.95);
+	METALLIC = 0.06;
+	EMISSION = ember * rim_heat * 0.65;
 }

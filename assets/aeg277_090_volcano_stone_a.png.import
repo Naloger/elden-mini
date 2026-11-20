@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bqmopka6c1nl5"
-path="res://.godot/imported/aeg277_090_volcano_stone_a.png-6023f93003299e5b7a9a6c780fde1194.ctex"
+path.s3tc="res://.godot/imported/aeg277_090_volcano_stone_a.png-6023f93003299e5b7a9a6c780fde1194.s3tc.ctex"
+path.etc2="res://.godot/imported/aeg277_090_volcano_stone_a.png-6023f93003299e5b7a9a6c780fde1194.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "974f5c194e8f60c8c15f484b7073e3d2"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/aeg277_090_volcano_stone_a.png"
-dest_files=["res://.godot/imported/aeg277_090_volcano_stone_a.png-6023f93003299e5b7a9a6c780fde1194.ctex"]
+dest_files=["res://.godot/imported/aeg277_090_volcano_stone_a.png-6023f93003299e5b7a9a6c780fde1194.s3tc.ctex", "res://.godot/imported/aeg277_090_volcano_stone_a.png-6023f93003299e5b7a9a6c780fde1194.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0
