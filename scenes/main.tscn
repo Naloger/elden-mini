@@ -13,6 +13,8 @@
 [ext_resource type="PackedScene" uid="uid://4rn5sei7axu2" path="res://assets/crucible_knight.glb" id="11_crucible_glb"]
 [ext_resource type="PackedScene" uid="uid://cq2on0of17f8p" path="res://assets/crucible_shield.glb" id="12_shield_glb"]
 [ext_resource type="PackedScene" path="res://scenes/rykard_props.tscn" id="13_props_tscn"]
+[ext_resource type="Texture2D" path="res://assets/textures/volcano_rock_a.png" id="14_floor_a"]
+[ext_resource type="Texture2D" path="res://assets/textures/volcano_rock_n.png" id="15_floor_n"]
 
 [sub_resource type="Environment" id="Environment_volcano"]
 background_mode = 1
@@ -33,6 +35,9 @@ radial_segments = 48
 [sub_resource type="ShaderMaterial" id="Mat_floor"]
 render_priority = 0
 shader = ExtResource("7_floor_shader")
+shader_parameter/albedo_tex = ExtResource("14_floor_a")
+shader_parameter/normal_tex = ExtResource("15_floor_n")
+shader_parameter/uv_scale = 0.22
 
 [sub_resource type="CylinderShape3D" id="CylinderShape_floor"]
 height = 1.0
@@ -181,7 +186,7 @@ shape = SubResource("CapsuleShape_player")
 [node name="Visual" type="Node3D" parent="Player" unique_id=1198372381]
 
 [node name="CrucibleKnight" parent="Player/Visual" unique_id=1005980466 instance=ExtResource("11_crucible_glb")]
-transform = Transform3D(-1, 0, 0, 0, -4.37114e-08, -1, 0, -1, 4.37114e-08, 0, 0, 0)
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
 
 [node name="ShieldPivot" type="Node3D" parent="Player/Visual" unique_id=696170870]
 transform = Transform3D(-0.34, 0, 0.94, 0, 1, 0, -0.94, 0, -0.34, -0.45, 1.05, -0.18)

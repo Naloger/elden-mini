@@ -60,12 +60,20 @@ func _physics_process(delta: float) -> void:
 			if global_position.y <= 0.25:
 				queue_free()
 
+const LAVA_SHADER := preload("res://shaders/lava.gdshader")
+
 func _transform_to_lava_pool() -> void:
 	kind = Kind.LAVA_POOL
 	_age = 0.0
 	lifetime = 4.2
-	global_position.y = 0.06
-	scale = Vector3(3.4, 0.18, 3.4)
+	global_position.y = 0.04
+	scale = Vector3(3.4, 0.08, 3.4)
+	for c in get_children():
+		if c is MeshInstance3D:
+			var sm := ShaderMaterial.new()
+			sm.shader = LAVA_SHADER
+			sm.set_shader_parameter("speed", 0.35)
+			(c as MeshInstance3D).set_surface_override_material(0, sm)
 
 func _on_body_entered(body: Node) -> void:
 	if _hit_player or kind == Kind.LAVA_POOL:

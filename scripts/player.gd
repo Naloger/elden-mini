@@ -45,54 +45,48 @@ func _ready() -> void:
 	if boss_path != NodePath():
 		_boss = get_node_or_null(boss_path)
 	_collect_skeletons(visual)
+	_setup_player_real_anims()
+	_attach_equipment_to_hands()
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
 
 func _setup_player_real_anims() -> void:
+	var ap := _find_ap(visual)
+	if not ap:
+		return
+	for cname in ["idle", "walk", "run", "roll"]:
+		if ap.has_animation(cname):
+			var anim := ap.get_animation(cname)
+			anim.loop_mode = Animation.LOOP_LINEAR if cname != "roll" else Animation.LOOP_NONE
+	_anim_players = [ap]
+	if ap.has_animation("idle"):
+		ap.play("idle")
+		_current_anim = "idle"
+
+func _attach_equipment_to_hands() -> void:
 	if _skels.is_empty():
 		return
-	var lib := AnimationLibrary.new()
-	var clips := {
-		"idle": ["res://assets/anims/player/a000_000000.glb", true],
-		"walk": ["res://assets/anims/player/a000_000100.glb", true],
-		"run": ["res://assets/anims/player/a000_000110.glb", true],
-		"roll": ["res://assets/anims/player/a000_004000.glb", false],
-	}
-	for cname in clips.keys():
-		var info: Array = clips[cname]
-		var anim := _extract_anim(info[0], info[1])
-		if anim:
-			lib.add_animation(cname, anim)
-	for sk in _skels:
-		var p := sk.get_parent()
-		if not p:
-			continue
-		if p is Node3D:
-			(p as Node3D).transform = Transform3D.IDENTITY
-		var ap := AnimationPlayer.new()
-		p.add_child(ap)
-		ap.add_animation_library("", lib.duplicate(true))
-		if ap.has_animation("idle"):
-			ap.play("idle")
-		_anim_players.append(ap)
-	_current_anim = "idle"
-
-func _extract_anim(glb_path: String, loop: bool) -> Animation:
-	var ps: PackedScene = load(glb_path)
-	if not ps:
-		return null
-	var tmp := ps.instantiate()
-	var src_ap := _find_ap(tmp)
-	var out_anim: Animation = null
-	if src_ap and src_ap.has_animation("Motion"):
-		out_anim = src_ap.get_animation("Motion").duplicate() as Animation
-		out_anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
-		for i in range(out_anim.get_track_count() - 1, -1, -1):
-			var ttype := out_anim.track_get_type(i)
-			if ttype == Animation.TYPE_POSITION_3D or ttype == Animation.TYPE_SCALE_3D:
-				out_anim.remove_track(i)
-	tmp.queue_free()
-	return out_anim
+	var sk: Skeleton3D = _skels[0]
+	var r_hand_idx := sk.find_bone("R_Hand")
+	if r_hand_idx != -1 and weapon_pivot:
+		var ba_r := BoneAttachment3D.new()
+		ba_r.name = "RightHandAttachment"
+		ba_r.bone_name = "R_Hand"
+		sk.add_child(ba_r)
+		weapon_pivot.reparent(ba_r, false)
+		weapon_pivot.transform = Transform3D.IDENTITY
+		weapon_pivot.position = Vector3(0.0, 0.06, 0.04)
+		weapon_pivot.rotation_degrees = Vector3(-15.0, 180.0, 0.0)
+	var l_hand_idx := sk.find_bone("L_Hand")
+	if l_hand_idx != -1 and shield_pivot:
+		var ba_l := BoneAttachment3D.new()
+		ba_l.name = "LeftHandAttachment"
+		ba_l.bone_name = "L_Hand"
+		sk.add_child(ba_l)
+		shield_pivot.reparent(ba_l, false)
+		shield_pivot.transform = Transform3D.IDENTITY
+		shield_pivot.position = Vector3(0.0, 0.05, 0.02)
+		shield_pivot.rotation_degrees = Vector3(0.0, 90.0, 0.0)
 
 func _find_ap(n: Node) -> AnimationPlayer:
 	if n is AnimationPlayer:
@@ -150,9 +144,7 @@ func _physics_process(delta: float) -> void:
 
 	if _is_dodging:
 		_dodge_timer -= delta
-		var roll_t := 1.0 - clampf(_dodge_timer / dodge_duration, 0.0, 1.0)
-		visual.rotation.x = -roll_t * TAU
-		visual.position.y = sin(roll_t * PI) * 0.45
+		_play_player_anim("roll")
 		velocity.x = _dodge_dir.x * dodge_speed
 		velocity.z = _dodge_dir.z * dodge_speed
 		if _dodge_timer <= 0.0:
@@ -201,27 +193,18 @@ func _physics_process(delta: float) -> void:
 
 	_anim_time += delta
 	var flat_speed := Vector2(velocity.x, velocity.z).length()
-	var is_moving := flat_speed > 0.5 and not _is_dodging
 
 	if not _is_dodging:
-		if is_moving:
-			var stride := sin(_anim_time * 11.0)
-			visual.position.y = absf(stride) * 0.045
-			visual.rotation.x = lerpf(visual.rotation.x, -0.08, 10.0 * delta)
-			if shield_pivot:
-				shield_pivot.position.y = 1.05 + absf(stride) * 0.03
-			_pose_knight_bones(stride * 0.55, 0.08)
+		if flat_speed > 5.0:
+			_play_player_anim("run")
+		elif flat_speed > 0.5:
+			_play_player_anim("walk")
 		else:
-			var breath := sin(_anim_time * 2.4)
-			visual.position.y = breath * 0.015
-			visual.rotation.x = lerpf(visual.rotation.x, 0.0, 10.0 * delta)
-			if shield_pivot:
-				shield_pivot.position.y = 1.05 + breath * 0.015
-			_pose_knight_bones(0.0, 0.0)
+			_play_player_anim("idle")
 
-	# Animate weapon pivot back to rest
+	# Animate weapon pivot back to rest after attack thrust
 	if weapon_pivot:
-		weapon_pivot.rotation.x = lerpf(weapon_pivot.rotation.x, 0.0, 10.0 * delta)
+		weapon_pivot.rotation.x = lerpf(weapon_pivot.rotation.x, deg_to_rad(-15.0), 10.0 * delta)
 
 func _pose_knight_bones(stride_rad: float, spine_lean: float) -> void:
 	for i in range(_skels.size()):

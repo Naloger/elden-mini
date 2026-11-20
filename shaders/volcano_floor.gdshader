@@ -1,5 +1,9 @@
 shader_type spatial;
 
+uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap, repeat_enable;
+uniform float uv_scale = 0.22;
+
 varying vec3 world_pos;
 
 float hash(vec2 p) {
@@ -30,19 +34,31 @@ void vertex() {
 }
 
 void fragment() {
-	vec2 p = world_pos.xz * 0.65;
-	float n = fbm(p);
-	float detail = fbm(p * 4.5);
-	float vein = abs(fbm(p * 1.4) - 0.5);
-	float crack = smoothstep(0.004, 0.014, vein);
+	vec2 uv_main = world_pos.xz * uv_scale;
+	vec2 uv_macro = world_pos.xz * (uv_scale * 0.27) + vec2(0.37, 0.61);
 
-	vec3 ash = vec3(0.06, 0.05, 0.045);
-	vec3 basalt = vec3(0.14, 0.115, 0.105);
-	vec3 ember = vec3(0.85, 0.20, 0.03);
+	vec3 tex_a = texture(albedo_tex, uv_main).rgb;
+	vec3 tex_macro = texture(albedo_tex, uv_macro).rgb;
+	vec3 rock = mix(tex_a, tex_macro, 0.35);
 
-	vec3 stone = mix(ash, basalt, n * 0.7 + detail * 0.3);
-	ALBEDO = mix(ember * 0.45, stone, crack);
-	ROUGHNESS = 0.94;
-	METALLIC = 0.04;
-	EMISSION = ember * (1.0 - crack) * 0.25;
+	vec3 n1 = texture(normal_tex, uv_main).rgb;
+	vec3 n2 = texture(normal_tex, uv_macro).rgb;
+	NORMAL_MAP = normalize(mix(n1, n2, 0.3));
+	NORMAL_MAP_DEPTH = 1.45;
+
+	// Darken & char toward Volcano Manor basalt/ash palette
+	float ash_mask = fbm(world_pos.xz * 0.18);
+	vec3 basalt_tint = mix(vec3(0.36, 0.28, 0.24), vec3(0.55, 0.44, 0.38), ash_mask);
+	vec3 stone = rock * basalt_tint;
+
+	// Fine glowing magma fissures in rock crevices
+	float vein = abs(fbm(world_pos.xz * 0.45) - 0.5);
+	float crack = smoothstep(0.003, 0.011, vein);
+	float pulse = 0.78 + 0.22 * sin(TIME * 2.1 + world_pos.x * 0.3 + world_pos.z * 0.25);
+	vec3 ember = vec3(1.0, 0.24, 0.03) * pulse;
+
+	ALBEDO = mix(ember * 0.5, stone, crack);
+	ROUGHNESS = mix(0.35, 0.90 - rock.r * 0.12, crack);
+	METALLIC = 0.05;
+	EMISSION = ember * (1.0 - crack) * 0.45;
 }
