@@ -67,20 +67,21 @@ func _attach_equipment_to_hands() -> void:
 	if _skels.is_empty():
 		return
 	var sk: Skeleton3D = _skels[0]
-	var r_bone := "R_Weapon" if sk.find_bone("R_Weapon") != -1 else "R_Hand"
-	if sk.find_bone(r_bone) != -1 and weapon_pivot:
+	# Note: c0000 glTF is X-mirrored from Elden Ring's left-handed space (+X = right side, -X = left side)
+	var right_hand_bone := "L_Weapon" if sk.find_bone("L_Weapon") != -1 else "L_Hand"
+	if sk.find_bone(right_hand_bone) != -1 and weapon_pivot:
 		var ba_r := BoneAttachment3D.new()
 		ba_r.name = "RightWeaponAttachment"
-		ba_r.bone_name = r_bone
+		ba_r.bone_name = right_hand_bone
 		sk.add_child(ba_r)
 		weapon_pivot.reparent(ba_r, false)
 		weapon_pivot.transform = Transform3D.IDENTITY
 		weapon_pivot.rotation_degrees = Vector3(15.0, 0.0, 0.0)
-	var l_bone := "L_Weapon" if sk.find_bone("L_Weapon") != -1 else "L_Hand"
-	if sk.find_bone(l_bone) != -1 and shield_pivot:
+	var left_hand_bone := "R_Weapon" if sk.find_bone("R_Weapon") != -1 else "R_Hand"
+	if sk.find_bone(left_hand_bone) != -1 and shield_pivot:
 		var ba_l := BoneAttachment3D.new()
 		ba_l.name = "LeftWeaponAttachment"
-		ba_l.bone_name = l_bone
+		ba_l.bone_name = left_hand_bone
 		sk.add_child(ba_l)
 		shield_pivot.reparent(ba_l, false)
 		shield_pivot.transform = Transform3D.IDENTITY
