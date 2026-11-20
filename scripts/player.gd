@@ -21,6 +21,8 @@ var touch_move_vec: Vector2 = Vector2.ZERO
 var _is_dodging: bool = false
 var _dodge_timer: float = 0.0
 var _dodge_dir: Vector3 = Vector3.FORWARD
+var _is_attacking: bool = false
+var _attack_timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _stamina_regen_delay: float = 0.0
 var _invulnerable: bool = false
@@ -37,6 +39,16 @@ var _current_anim: String = ""
 @onready var shield_pivot: Node3D = $Visual/ShieldPivot
 
 const BEAM_SCRIPT := preload("res://scripts/serpent_beam.gd")
+const WEAPON_REST_BASIS := Basis(
+	Vector3(0.702013, -0.087365, -0.706785),
+	Vector3(0.693094, -0.144311, 0.706254),
+	Vector3(-0.163698, -0.985668, -0.040756)
+)
+const SHIELD_REST_BASIS := Basis(
+	Vector3(-0.65956, 0.345855, 0.667356),
+	Vector3(0.219584, 0.93778, -0.268981),
+	Vector3(-0.718862, -0.030869, -0.694467)
+)
 
 func _ready() -> void:
 	add_to_group("player")
@@ -54,10 +66,10 @@ func _setup_player_real_anims() -> void:
 	var ap := _find_ap(visual)
 	if not ap:
 		return
-	for cname in ["idle", "walk", "run", "roll"]:
+	for cname in ["idle", "walk", "run", "roll", "attack", "heavy_attack"]:
 		if ap.has_animation(cname):
 			var anim := ap.get_animation(cname)
-			anim.loop_mode = Animation.LOOP_LINEAR if cname != "roll" else Animation.LOOP_NONE
+			anim.loop_mode = Animation.LOOP_LINEAR if cname in ["idle", "walk", "run"] else Animation.LOOP_NONE
 	_anim_players = [ap]
 	if ap.has_animation("idle"):
 		ap.play("idle")
@@ -75,8 +87,7 @@ func _attach_equipment_to_hands() -> void:
 		ba_r.bone_name = right_hand_bone
 		sk.add_child(ba_r)
 		weapon_pivot.reparent(ba_r, false)
-		weapon_pivot.transform = Transform3D.IDENTITY
-		weapon_pivot.rotation_degrees = Vector3(15.0, 0.0, 0.0)
+		weapon_pivot.transform = Transform3D(WEAPON_REST_BASIS.orthonormalized(), Vector3.ZERO)
 	var left_hand_bone := "R_Weapon" if sk.find_bone("R_Weapon") != -1 else "R_Hand"
 	if sk.find_bone(left_hand_bone) != -1 and shield_pivot:
 		var ba_l := BoneAttachment3D.new()
@@ -84,7 +95,7 @@ func _attach_equipment_to_hands() -> void:
 		ba_l.bone_name = left_hand_bone
 		sk.add_child(ba_l)
 		shield_pivot.reparent(ba_l, false)
-		shield_pivot.transform = Transform3D.IDENTITY
+		shield_pivot.transform = Transform3D(SHIELD_REST_BASIS.orthonormalized(), Vector3.ZERO)
 
 func _find_ap(n: Node) -> AnimationPlayer:
 	if n is AnimationPlayer:
@@ -95,13 +106,17 @@ func _find_ap(n: Node) -> AnimationPlayer:
 			return res
 	return null
 
-func _play_player_anim(cname: String) -> void:
-	if _current_anim == cname or _anim_players.is_empty():
+func _play_player_anim(cname: String, force_restart: bool = false) -> void:
+	if not force_restart and _current_anim == cname:
+		return
+	if _anim_players.is_empty():
 		return
 	_current_anim = cname
 	for ap in _anim_players:
 		if ap.has_animation(cname):
-			ap.play(cname, 0.12)
+			if force_restart:
+				ap.stop()
+			ap.play(cname, 0.1)
 
 func _collect_skeletons(node: Node) -> void:
 	if not node:
@@ -139,6 +154,11 @@ func _physics_process(delta: float) -> void:
 	if _stamina_regen_delay <= 0.0 and stamina < max_stamina:
 		stamina = minf(max_stamina, stamina + 34.0 * delta)
 		emit_signal("stamina_changed", stamina, max_stamina)
+
+	if _is_attacking:
+		_attack_timer -= delta
+		if _attack_timer <= 0.0:
+			_is_attacking = false
 
 	if _is_dodging:
 		_dodge_timer -= delta
@@ -192,7 +212,7 @@ func _physics_process(delta: float) -> void:
 	_anim_time += delta
 	var flat_speed := Vector2(velocity.x, velocity.z).length()
 
-	if not _is_dodging:
+	if not _is_dodging and not _is_attacking:
 		if flat_speed > 5.0:
 			_play_player_anim("run")
 		elif flat_speed > 0.5:
@@ -200,9 +220,11 @@ func _physics_process(delta: float) -> void:
 		else:
 			_play_player_anim("idle")
 
-	# Animate weapon pivot back to rest after attack thrust
-	if weapon_pivot:
-		weapon_pivot.rotation.x = lerpf(weapon_pivot.rotation.x, deg_to_rad(15.0), 10.0 * delta)
+	# Maintain proper weapon and shield rotations on their bone attachments
+	if weapon_pivot and weapon_pivot.transform.basis != WEAPON_REST_BASIS:
+		weapon_pivot.transform.basis = weapon_pivot.transform.basis.slerp(WEAPON_REST_BASIS, 10.0 * delta)
+	if shield_pivot and shield_pivot.transform.basis != SHIELD_REST_BASIS:
+		shield_pivot.transform.basis = shield_pivot.transform.basis.slerp(SHIELD_REST_BASIS, 10.0 * delta)
 
 func _pose_knight_bones(stride_rad: float, spine_lean: float) -> void:
 	for i in range(_skels.size()):
@@ -274,19 +296,22 @@ func trigger_dodge() -> void:
 		_dodge_dir = -visual.global_transform.basis.z.normalized()
 
 	_is_dodging = true
+	_is_attacking = false
 	_invulnerable = true
 	_dodge_timer = dodge_duration
+	_play_player_anim("roll", true)
 
 func trigger_attack() -> void:
 	if _dead or _is_dodging or _attack_cooldown > 0.0 or stamina < attack_stamina_cost:
 		return
 	stamina -= attack_stamina_cost
 	_stamina_regen_delay = 0.65
-	_attack_cooldown = 0.48
+	_attack_cooldown = 0.55
+	_is_attacking = true
+	_attack_timer = 0.55
 	emit_signal("stamina_changed", stamina, max_stamina)
 
-	if weapon_pivot:
-		weapon_pivot.rotation.x = -1.15
+	_play_player_anim("attack", true)
 
 	# Face boss on Serpent-Hunter strike
 	var aim_dir := -visual.global_transform.basis.z.normalized()
