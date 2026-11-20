@@ -67,26 +67,23 @@ func _attach_equipment_to_hands() -> void:
 	if _skels.is_empty():
 		return
 	var sk: Skeleton3D = _skels[0]
-	var r_hand_idx := sk.find_bone("R_Hand")
-	if r_hand_idx != -1 and weapon_pivot:
+	var r_bone := "R_Weapon" if sk.find_bone("R_Weapon") != -1 else "R_Hand"
+	if sk.find_bone(r_bone) != -1 and weapon_pivot:
 		var ba_r := BoneAttachment3D.new()
-		ba_r.name = "RightHandAttachment"
-		ba_r.bone_name = "R_Hand"
+		ba_r.name = "RightWeaponAttachment"
+		ba_r.bone_name = r_bone
 		sk.add_child(ba_r)
 		weapon_pivot.reparent(ba_r, false)
 		weapon_pivot.transform = Transform3D.IDENTITY
-		weapon_pivot.position = Vector3(0.0, 0.06, 0.04)
-		weapon_pivot.rotation_degrees = Vector3(-15.0, 180.0, 0.0)
-	var l_hand_idx := sk.find_bone("L_Hand")
-	if l_hand_idx != -1 and shield_pivot:
+		weapon_pivot.rotation_degrees = Vector3(15.0, 0.0, 0.0)
+	var l_bone := "L_Weapon" if sk.find_bone("L_Weapon") != -1 else "L_Hand"
+	if sk.find_bone(l_bone) != -1 and shield_pivot:
 		var ba_l := BoneAttachment3D.new()
-		ba_l.name = "LeftHandAttachment"
-		ba_l.bone_name = "L_Hand"
+		ba_l.name = "LeftWeaponAttachment"
+		ba_l.bone_name = l_bone
 		sk.add_child(ba_l)
 		shield_pivot.reparent(ba_l, false)
 		shield_pivot.transform = Transform3D.IDENTITY
-		shield_pivot.position = Vector3(0.0, 0.05, 0.02)
-		shield_pivot.rotation_degrees = Vector3(0.0, 90.0, 0.0)
 
 func _find_ap(n: Node) -> AnimationPlayer:
 	if n is AnimationPlayer:
@@ -204,7 +201,7 @@ func _physics_process(delta: float) -> void:
 
 	# Animate weapon pivot back to rest after attack thrust
 	if weapon_pivot:
-		weapon_pivot.rotation.x = lerpf(weapon_pivot.rotation.x, deg_to_rad(-15.0), 10.0 * delta)
+		weapon_pivot.rotation.x = lerpf(weapon_pivot.rotation.x, deg_to_rad(15.0), 10.0 * delta)
 
 func _pose_knight_bones(stride_rad: float, spine_lean: float) -> void:
 	for i in range(_skels.size()):

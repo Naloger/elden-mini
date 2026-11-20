@@ -186,19 +186,14 @@ shape = SubResource("CapsuleShape_player")
 [node name="Visual" type="Node3D" parent="Player" unique_id=1198372381]
 
 [node name="CrucibleKnight" parent="Player/Visual" unique_id=1005980466 instance=ExtResource("11_crucible_glb")]
-transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
 
 [node name="ShieldPivot" type="Node3D" parent="Player/Visual" unique_id=696170870]
-transform = Transform3D(-0.34, 0, 0.94, 0, 1, 0, -0.94, 0, -0.34, -0.45, 1.05, -0.18)
 
 [node name="CrucibleShield" parent="Player/Visual/ShieldPivot" unique_id=2001655961 instance=ExtResource("12_shield_glb")]
-transform = Transform3D(0, 1, 0, 0, 0, -1, -1, 0, 0, 0, 0, 0)
 
 [node name="WeaponPivot" type="Node3D" parent="Player/Visual" unique_id=445045758]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.45, 1.05, -0.2)
 
 [node name="SerpentHunter" parent="Player/Visual/WeaponPivot" unique_id=728058805 instance=ExtResource("6_spear_glb")]
-transform = Transform3D(1, 0, 0, 0, 0.258819, 0.965926, 0, -0.965926, 0.258819, 0, 0, -0.55)
 
 [node name="BossCamera" type="Camera3D" parent="." unique_id=1485703547]
 transform = Transform3D(1, 0, 0, 0, 0.92, 0.39, 0, -0.39, 0.92, 0, 4.5, 18)
